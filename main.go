@@ -5,15 +5,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 const endpoint = "https://boardgamegeek.com/xmlapi2/collection?subtype=boardgame&own=1&stats=1&username="
-const username = ""
 const maxRequestAttempts = 5
-const playerCount = 4
-const weight = "light"
-const playTime = "short"
+
+func Map[T, U any](ts []T, f func(T) U) []U {
+	us := make([]U, len(ts))
+	for i := range ts {
+		us[i] = f(ts[i])
+	}
+	return us
+}
 
 type ValueRange struct {
 	Min int
@@ -108,7 +115,7 @@ type Status struct {
 	LastModified string `xml:"lastmodified,attr"`
 }
 
-func getCollection() (string, error) {
+func getCollection(username string) (string, error) {
 	url := endpoint + username
 	reader := strings.NewReader(``)
 	request, err := http.NewRequest("GET", url, reader)
@@ -155,7 +162,7 @@ func parseCollection(collection string) (Items, error) {
 	return items, nil
 }
 
-func filterCollection(collection Items) Items {
+func filterCollection(collection Items, playerCount int, weight string, playTime string) Items {
 	var filteredCollection Items
 	for _, item := range collection.ItemList {
 		if item.Stats.MinPlayers <= playerCount &&
@@ -168,11 +175,39 @@ func filterCollection(collection Items) Items {
 	return filteredCollection
 }
 
-func main() {
-	collectionString, _ := getCollection()
+func pickGames(username string, playerCount int, weight string, playTime string) []Item {
+	collectionString, _ := getCollection(username)
 	collection, _ := parseCollection(collectionString)
-	filteredCollection := filterCollection(collection)
-	for _, item := range filteredCollection.ItemList {
-		fmt.Println(item.Name.Value)
+	filteredCollection := filterCollection(collection, playerCount, weight, playTime)
+	return filteredCollection.ItemList
+}
+
+func handleRequest(c *gin.Context) {
+	username := c.Query("username")
+	playerCountString := c.Query("playerCount")
+	weight := c.Query("weight")
+	playTime := c.Query("playTime")
+	if username == "" || playerCountString == "" || weight == "" || playTime == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Missing parameters"})
+		return
 	}
+	playerCount, err := strconv.Atoi(playerCountString)
+
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid player count"})
+		return
+	}
+	games := pickGames(username, playerCount, weight, playTime)
+	c.JSON(http.StatusOK, Map(games, func(item Item) string {
+		return item.Name.Value
+	}))
+}
+
+func main() {
+
+	r := gin.Default()
+
+	r.GET("/", handleRequest)
+
+	r.Run("localhost:8000")
 }
