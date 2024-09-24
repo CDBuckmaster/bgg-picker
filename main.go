@@ -20,6 +20,7 @@ import (
 const endpoint = "https://boardgamegeek.com/xmlapi2/collection?subtype=boardgame&own=1&stats=1&username="
 const maxRequestAttempts = 5
 
+// Didn't write this myself, simple array map function
 func Map[T, U any](ts []T, f func(T) U) []U {
 	us := make([]U, len(ts))
 	for i := range ts {
@@ -28,6 +29,7 @@ func Map[T, U any](ts []T, f func(T) U) []U {
 	return us
 }
 
+// Simple struct for any value that represents a range
 type ValueRange struct {
 	Min int
 	Max int
@@ -37,17 +39,14 @@ func (v ValueRange) IsInBetween(value int) bool {
 	return value >= v.Min && value <= v.Max
 }
 
-var weights = map[string]ValueRange{
-	"light":  ValueRange{1, 2},
-	"medium": ValueRange{2, 3},
-	"heavy":  ValueRange{3, 5},
-}
+// Map of available play time values
 var playTimes = map[string]ValueRange{
 	"short":  ValueRange{0, 30},
 	"medium": ValueRange{30, 90},
 	"long":   ValueRange{90, 1000},
 }
 
+// BGG XML Entities
 type Items struct {
 	XMLName    xml.Name `xml:"items"`
 	TotalItems int      `xml:"totalitems,attr"`
@@ -121,6 +120,7 @@ type Status struct {
 	LastModified string `xml:"lastmodified,attr"`
 }
 
+// Retrieve raw response from BGG
 func getCollection(username string) (string, error) {
 	url := endpoint + username
 	reader := strings.NewReader(``)
@@ -135,6 +135,7 @@ func getCollection(username string) (string, error) {
 	var bodyString string
 	counter := 0
 
+	// BGG has a weird queue system where they encourage you to keep making requests until it works
 	for responseCode != "200 OK" && counter < maxRequestAttempts {
 		counter++
 		resp, err := client.Do(request)
@@ -158,6 +159,7 @@ func getCollection(username string) (string, error) {
 	return bodyString, nil
 }
 
+// Convert XML data into Go structs
 func parseCollection(collection string) (Items, error) {
 	var items Items
 	err := xml.Unmarshal([]byte(collection), &items)
@@ -168,32 +170,34 @@ func parseCollection(collection string) (Items, error) {
 	return items, nil
 }
 
-func filterCollection(collection Items, playerCount int, weight string, playTime string) Items {
+// Filter items by user's parameters
+func filterCollection(collection Items, playerCount int, playTime string) Items {
 	var filteredCollection Items
 	for _, item := range collection.ItemList {
 		if item.Stats.MinPlayers <= playerCount &&
 			item.Stats.MaxPlayers >= playerCount &&
 			playTimes[playTime].IsInBetween(item.Stats.PlayingTime) {
-			//weights[weight].IsInBetween(int(item.Rating.Average.Value)) {
 			filteredCollection.ItemList = append(filteredCollection.ItemList, item)
 		}
 	}
 	return filteredCollection
 }
 
-func pickGames(username string, playerCount int, weight string, playTime string) []Item {
+// @TODO retrieving and parsing collection should be done in a repo
+// Retrieves collection, parses it and then filters based on user params
+func pickGames(username string, playerCount int, playTime string) []Item {
 	collectionString, _ := getCollection(username)
 	collection, _ := parseCollection(collectionString)
-	filteredCollection := filterCollection(collection, playerCount, weight, playTime)
+	filteredCollection := filterCollection(collection, playerCount, playTime)
 	return filteredCollection.ItemList
 }
 
+// Handles request and performs basic validation
 func handleRequest(c *gin.Context) {
 	username := c.Query("username")
 	playerCountString := c.Query("playerCount")
-	weight := c.Query("weight")
 	playTime := c.Query("playTime")
-	if username == "" || playerCountString == "" || weight == "" || playTime == "" {
+	if username == "" || playerCountString == "" || playTime == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Missing parameters"})
 		return
 	}
@@ -203,7 +207,7 @@ func handleRequest(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "Invalid player count"})
 		return
 	}
-	games := pickGames(username, playerCount, weight, playTime)
+	games := pickGames(username, playerCount, playTime)
 	c.JSON(http.StatusOK, Map(games, func(item Item) string {
 		return item.Name.Value
 	}))
