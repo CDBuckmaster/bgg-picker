@@ -5,7 +5,9 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -219,17 +221,23 @@ func GinRequestHandler(ctx context.Context, request events.APIGatewayProxyReques
 	return ginLambda.ProxyWithContext(ctx, request)
 }
 
-func init() {
+func main() {
 
 	//Set the router as the default one provided by Gin
 	router := gin.Default()
 
+	//Define our routes
 	router.GET("/", handleRequest)
 
-	// Start and run the server
-	ginLambda = ginadapter.New(router)
-}
-
-func main() {
-	lambda.Start(GinRequestHandler)
+	// Check whether port is provided, assume is lambda deployment if not
+	httpPort := os.Getenv("HTTP_PORT")
+	if httpPort == "" {
+		log.Println("Starting Lambda Handler")
+		ginLambda = ginadapter.New(router)
+		lambda.Start(GinRequestHandler)
+	} else {
+		log.Printf("Starting HTTP server on port %s\n", httpPort)
+		formattedPort := fmt.Sprintf("localhost:%s", httpPort)
+		router.Run(formattedPort)
+	}
 }
